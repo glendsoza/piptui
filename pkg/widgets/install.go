@@ -13,9 +13,10 @@ type Install struct {
 
 func NewInstallWidget() *Install {
 	form := tview.NewForm().
-		AddInputField("Name and Version", "", 0, nil, nil).
-		AddInputField("File Path", "", 0, nil, nil).
-		AddButton("Submit", nil)
+		AddInputField("Package Name and Version", "", 0, nil, nil).
+		AddInputField("Extra Arguments", "", 0, nil, nil).
+		AddButton("Submit", nil).
+		AddButton("Cancel", nil)
 	form.SetBorder(true).
 		SetBorderColor(tcell.ColorNavy)
 	text := tview.NewTextView().
@@ -25,7 +26,7 @@ func NewInstallWidget() *Install {
 		SetBorderColor(tcell.ColorYellowGreen)
 	flex := tview.NewFlex().
 		AddItem(form, 0, 1, true).
-		AddItem(text, 0, 2, false)
+		AddItem(text, 0, 1, false)
 	return &Install{
 		Flex: flex,
 		form: form,

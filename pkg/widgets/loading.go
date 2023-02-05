@@ -3,6 +3,7 @@ package widgets
 import (
 	"time"
 
+	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
 )
 
@@ -13,9 +14,11 @@ type Loading struct {
 }
 
 func NewLoadingWidget() *Loading {
-	text := tview.NewTextView()
-	text.SetBorder(true)
-	loadChar := "Loading...."
+	text := tview.NewTextView().
+		SetDynamicColors(true)
+	text.SetBorder(true).
+		SetBorderColor(tcell.ColorNavy)
+	loadChar := "[yellow::]Loading...."
 	return &Loading{
 		TextView: text,
 		loadChar: loadChar,

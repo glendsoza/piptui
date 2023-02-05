@@ -3,6 +3,7 @@ package widgets
 import (
 	"bufio"
 	"fmt"
+	"strings"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/glendsoza/piptui/pkg/pip"
@@ -50,54 +51,72 @@ func (u *UI) preparePackagesWidget() {
 			u.app.SetRoot(u.install, true)
 			return nil
 		case tcell.KeyCtrlU:
-			selected := u.packages.table.GetCell(u.packages.table.GetSelection())
-			modal := tview.NewModal()
-			modal.SetText(fmt.Sprintf("Do you really want to uninstall %s[-:-:-]?\n", selected.Text))
-			modal.AddButtons([]string{"Confirm", "Cancel"})
-			modal.SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-				switch buttonLabel {
-				case "Cancel":
-					u.app.SetRoot(u.packages, true)
-				case "Confirm":
-					out := u.pipHelper.Uninstall(selected.Text)
-					modal.SetText(string(out))
-					u.loadPackagesWidget()
-					u.app.SetRoot(modal, true)
-				}
-			})
-			u.app.SetRoot(modal, true)
-			return nil
+			// column is always 0 as we are only interested in name and not version
+			r, _ := u.packages.table.GetSelection()
+			if r != 0 {
+				selected := u.packages.table.GetCell(r, 0)
+				modal := tview.NewModal()
+				modal.SetText(fmt.Sprintf("Do you really want to uninstall %s[-:-:-]?\n (this is a force uninstall)", selected.Text))
+				modal.AddButtons([]string{"Confirm", "Cancel"})
+				modal.SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+					switch buttonLabel {
+					case "Cancel":
+						u.app.SetRoot(u.packages, true)
+					case "Confirm":
+						out := u.pipHelper.Uninstall(selected.Text)
+						modal.SetText(string(out))
+						u.loadPackagesWidget()
+						u.app.SetRoot(modal, true)
+					}
+				})
+				u.app.SetRoot(modal, true)
+				return nil
+			}
 		}
 		return event
 	})
 	u.packages.table.SetSelectionChangedFunc(func(row, column int) {
-		name := u.packages.table.GetCell(row, 0)
-		version := u.packages.table.GetCell(row, 1)
-		info := ""
-		pkg, err := u.pipHelper.Show(name.Text, version.Text)
-		if err != nil {
-			info = err.Error()
+		if row != 0 {
+			name := u.packages.table.GetCell(row, 0)
+			version := u.packages.table.GetCell(row, 1)
+			info := ""
+			pkg, err := u.pipHelper.Show(name.Text, version.Text)
+			if err != nil {
+				info = err.Error()
+			} else {
+				info = pkg.ToString()
+			}
+			u.packages.text.SetText(info).ScrollToBeginning()
 		} else {
-			info = pkg.ToString()
+			u.packages.text.SetText("You will see package details here").ScrollToBeginning()
 		}
-		u.packages.text.SetText(info).ScrollToBeginning()
+
 	})
 }
 
 func (u *UI) prepareInstallWidget() {
-	button := u.install.form.GetButton(0)
-	button.SetSelectedFunc(func() {
-		if button.GetLabel() == "Submit" {
-			nameAndVersion := u.install.form.GetFormItemByLabel("Name and Version")
-			field, ok := nameAndVersion.(*tview.InputField)
-			if ok {
-				r, _ := u.pipHelper.InstallAndStream(field.GetText())
-				// set the label as disabled
-				button.SetLabel("Disabled")
-				go func() {
-					reader := bufio.NewScanner(r)
-					for reader.Scan() {
-						fmt.Fprintf(u.install.text, "[green]%s>>>[-:-:-] %s\n", field.GetText(), reader.Text())
+	Submitbutton := u.install.form.GetButton(0)
+	Submitbutton.SetSelectedFunc(func() {
+		nameAndVersion := u.install.form.GetFormItemByLabel("Package Name and Version")
+		extraArguments := u.install.form.GetFormItemByLabel("Extra Arguments")
+		nameAndVersionField, fieldOk := nameAndVersion.(*tview.InputField)
+		extraArgumentsField, extraArgsOk := extraArguments.(*tview.InputField)
+		if fieldOk && extraArgsOk {
+			command := nameAndVersionField.GetText()
+			if strings.TrimSpace(extraArgumentsField.GetText()) != "" {
+				command = fmt.Sprintf("%s %s", strings.TrimSpace(extraArgumentsField.GetText()), command)
+			}
+			r, _ := u.pipHelper.InstallAndStream(command)
+			// set the label as disabled
+			Submitbutton.SetLabel("Disabled")
+			go func() {
+				reader := bufio.NewScanner(r)
+				counter := 0
+				for reader.Scan() {
+					fmt.Fprintf(u.install.text, "[green]>>>[-:-:-] %s\n", reader.Text())
+					counter += 1
+					if counter >= 3 {
+						counter = 0
 						u.app.QueueUpdateDraw(
 							func() {
 								if u.install.HasFocus() {
@@ -105,19 +124,27 @@ func (u *UI) prepareInstallWidget() {
 								}
 							},
 						)
-
 					}
-					u.loadPackagesWidget()
-					button.SetLabel("Submit")
-					u.app.QueueUpdateDraw(func() {
-						if u.packages.HasFocus() {
-							u.app.SetRoot(u.packages, true)
-						} else if u.install.HasFocus() {
-							u.app.SetRoot(u.install, true)
-						}
-					})
-				}()
-			}
+				}
+				u.loadPackagesWidget()
+				Submitbutton.SetLabel("Submit")
+				u.app.QueueUpdateDraw(func() {
+					if u.packages.HasFocus() {
+						u.app.SetRoot(u.packages, true)
+					} else if u.install.HasFocus() {
+						u.app.SetRoot(u.install, true)
+					}
+				})
+			}()
+		}
+	})
+	cancelButton := u.install.form.GetButton(1)
+	cancelButton.SetSelectedFunc(func() {
+		if u.pipHelper.InstallInProgress() {
+			u.pipHelper.CancelInstall()
+			fmt.Fprintln(u.install.text, "[red::]Cancelled[-:-:-]")
+		} else {
+			fmt.Fprintln(u.install.text, "[blue::]Nothing to cancel[-:-:-]")
 		}
 	})
 	u.install.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
@@ -170,20 +197,24 @@ func (u *UI) loadPackagesWidget() error {
 	if err != nil {
 		return err
 	}
-	c := 0
-	for idx, pkg := range installedPackages {
-		if idx == 0 {
-			u.packages.text.SetText(pkg.ToString())
-		}
+	c := 1
+	u.packages.table.SetCell(0, 0, tview.NewTableCell("Name"))
+	u.packages.table.SetCell(0, 1, tview.NewTableCell("Version"))
+	u.packages.text.SetText("You will see package details here")
+	for _, pkg := range installedPackages {
 		u.packages.table.SetCell(c, 0, tview.NewTableCell(pkg.Name))
 		u.packages.table.SetCell(c, 1, tview.NewTableCell(pkg.Version))
 		c += 1
+	}
+	if len(installedPackages) > 0 {
+		u.packages.text.SetTitle(installedPackages[0].Location)
 	}
 	u.loadDependencyWidget(installedPackages)
 	return nil
 }
 
 func (u *UI) Run() error {
+	fatalErrChan := make(chan error)
 	go func() {
 		for {
 			if !u.loading.Load() {
@@ -199,11 +230,16 @@ func (u *UI) Run() error {
 	go func() {
 		err := u.loadPackagesWidget()
 		if err != nil {
-			u.app.Stop()
+			fatalErrChan <- err
 		}
 		u.app.QueueUpdateDraw(func() {
 			u.app.SetRoot(u.packages, true)
 		})
 	}()
-	return u.app.SetRoot(u.loading, true).Run()
+	go func() {
+		fatalErrChan <- u.app.SetRoot(u.loading, true).Run()
+	}()
+	err := <-fatalErrChan
+	u.app.Stop()
+	return err
 }

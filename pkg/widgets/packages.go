@@ -15,7 +15,7 @@ func NewPackagesView() *Packages {
 	text := tview.NewTextView()
 	text.SetBorder(true)
 	table := tview.NewTable().
-	SetSelectable(true, false)
+		SetSelectable(true, false)
 	table.SetBorder(true)
 	table.SetBorderColor(tcell.ColorNavy)
 	table.SetSelectedStyle(tcell.StyleDefault.Background(tcell.ColorGreen))

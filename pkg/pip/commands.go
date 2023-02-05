@@ -27,8 +27,18 @@ func (pc *PackageCache) Get(name string) (*Package, bool) {
 	return v, ok
 }
 
+type installStatus string
+
+const (
+	IN_PROGRESS installStatus = "In Progress"
+	READY       installStatus = "Ready"
+	INTERRUPTED installStatus = "Interrupted"
+)
+
 type PipHelper struct {
-	cache *PackageCache
+	cache         *PackageCache
+	installStatus installStatus
+	installCmd    *exec.Cmd
 }
 
 func NewPipHelper() *PipHelper {
@@ -37,10 +47,16 @@ func NewPipHelper() *PipHelper {
 			data: make(map[string]*Package),
 			lock: &sync.RWMutex{},
 		},
+		installStatus: READY,
+		installCmd:    nil,
 	}
 }
 
-var MATCH_SPACE_REGEX = regexp.MustCompile(`\s+`)
+var matchSpaceRegex = regexp.MustCompile(`\s+`)
+
+func (p *PipHelper) InstallInProgress() bool {
+	return p.installCmd != nil
+}
 
 func (p *PipHelper) show(packages []string) ([]byte, error) {
 	output, err := exec.Command("/bin/bash", "-c", fmt.Sprintf("pip show %s", strings.Join(packages, " "))).CombinedOutput()
@@ -63,8 +79,18 @@ func (p *PipHelper) InstallAndStream(nameAndVersion string) (io.Reader, error) {
 	cmd := exec.Command("/bin/bash", "-c", fmt.Sprintf("pip install %s 2>&1", nameAndVersion))
 	s, err := cmd.StdoutPipe()
 	cmd.Start()
-	go cmd.Wait()
+	p.installCmd = cmd
+	go func() {
+		cmd.Wait()
+		p.installCmd = nil
+	}()
 	return s, err
+}
+
+func (p *PipHelper) CancelInstall() {
+	if p.InstallInProgress() {
+		p.installCmd.Process.Kill()
+	}
 }
 
 func (p *PipHelper) Show(name string, version string) (*Package, error) {
@@ -85,11 +111,11 @@ func (p *PipHelper) Show(name string, version string) (*Package, error) {
 }
 
 func (p *PipHelper) List() (Packages, error) {
-	output, err := exec.Command("/bin/bash", "-c", "pip list").CombinedOutput()
+	output, err := exec.Command("/bin/bash", "-c", "pip list 2>&1").CombinedOutput()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf(string(output))
 	}
-	splitData := strings.Split(MATCH_SPACE_REGEX.ReplaceAllString(strings.TrimSpace(string(output)), " "), " ")[4:]
+	splitData := strings.Split(matchSpaceRegex.ReplaceAllString(strings.TrimSpace(string(output)), " "), " ")[4:]
 	var packages Packages
 	var packagesNamesList []string
 	for x := 0; x < len(splitData); x += 2 {
