@@ -2,7 +2,7 @@
 
 
 ## How to run
-- Download the binary from releases page 
+- Download the binary from [releases page](https://github.com/glendsoza/piptui/releases)
 - Activate the virtual environemnt and run the binary
 
 ## How to build 
